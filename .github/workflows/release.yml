@@ -1,0 +1,77 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Get Python version from mise
+        id: get_python_version
+        run: |
+          PYTHON_VERSION=$(grep -oP 'python = "\K[\d\.]+' mise.toml)
+          echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.get_python_version.outputs.PYTHON_VERSION }}
+
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Build executable
+        run: |
+          . .venv/bin/activate
+          pyinstaller --onefile main.py --log-level=FATAL
+          mv dist/main imgconv
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: imgconv-linux-x86_64
+          path: imgconv
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: imgconv-linux-x86_64
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            This release contains the latest changes for imgconv executable for linux x86_64.
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: imgconv
+          asset_name: imgconv-linux-x86_64
+          asset_content_type: application/octet-stream
