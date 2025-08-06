@@ -12,19 +12,40 @@ from typing import Generator, Tuple
 import click
 from magic import Magic
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 ERROR_LOG = "imgopt_errors.log"
 OPTIM_MARKER = "optim_"
 current_process = None
+current_output = None
 console = Console()
 
 
 def signal_handler(sig, frame):
     """Handle signals and clean up resources"""
-    global current_process
-    if current_process:
+    global current_process, current_output
+
+    if current_process is not None:
+        # Terminate the running conversion process
         current_process.terminate()
+        try:
+            current_process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            current_process.kill()
+
+    # Clean up unfinished output file
+    if current_output and current_output.exists():
+        try:
+            current_output.unlink()
+            console.print(f"\nRemoved incomplete file: {current_output}")
+        except Exception as e:
+            console.print(f"\nError removing incomplete file: {e}")
+
+    # Remove error log if empty
+    if Path(ERROR_LOG).exists() and Path(ERROR_LOG).stat().st_size == 0:
+        Path(ERROR_LOG).unlink()
+
     console.print("\nExiting due to interrupt...")
     sys.exit(1)
 
@@ -91,7 +112,7 @@ def process_image(
     resize_method: str,
 ) -> Tuple[bool, int]:
     """Process a single image file"""
-    global current_process
+    global current_process, current_output
     temp_file = None
     try:
         mime = Magic(mime=True)
@@ -103,6 +124,7 @@ def process_image(
         )
         temp_path = Path(temp_file.name)
         temp_file.close()
+        current_output = temp_path
 
         # Resize and optimize
         if mimetype == "image/jpeg":
@@ -206,6 +228,7 @@ def process_image(
         raise e
     finally:
         current_process = None
+        current_output = None
 
 
 def log_error(file_path: Path, error: str):
@@ -321,7 +344,7 @@ def main(input_path, jpeg_quality, max_dimension, process_all):
                 prefix = "[yellow]→[/yellow]"
             else:
                 prefix = "  "
-            lines.append(f"{prefix} {files[idx].name}")
+            lines.append(f"{prefix} {escape(files[idx].name)}")
         return lines
 
     with Live(
@@ -382,7 +405,7 @@ def main(input_path, jpeg_quality, max_dimension, process_all):
     console.print(f"\nProcessed {processed}/{total_files} files successfully")
     console.print(f"Total space saved: {format_size(total_saved)}")
     if errors > 0:
-        console.print(f"Encountered {errors} errors - see {ERROR_LOG} for details")
+        console.print(f"Encountered {errors} errors - see {escape(ERROR_LOG)} for details")
     else:
         if Path(ERROR_LOG).exists():
             Path(ERROR_LOG).unlink()
