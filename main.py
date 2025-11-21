@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Generator, Tuple
 
 import click
-from magic import Magic
 from rich.console import Console
 from rich.markup import escape
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
@@ -59,6 +58,18 @@ def format_size(bytes: float) -> str:
     return f"{bytes:.1f} TB"
 
 
+def get_mime_type(file_path: Path) -> str:
+    """Get MIME type using the file command."""
+    try:
+        result = subprocess.check_output(
+            ["file", "--mime-type", "-b", str(file_path)],
+            stderr=subprocess.DEVNULL,
+        )
+        return result.decode().strip()
+    except subprocess.CalledProcessError:
+        return ""
+
+
 class IsOptimized(Enum):
     NOT_IMAGE = 0
     NOT_OPTIMIZED = 1
@@ -71,8 +82,7 @@ def is_optimized(file_path: Path) -> IsOptimized:
     if file_path.name.startswith(OPTIM_MARKER):
         return IsOptimized.IS_OPTIMIZED
 
-    mime = Magic(mime=True)
-    mimetype = mime.from_file(file_path)
+    mimetype = get_mime_type(file_path)
     if not mimetype.startswith("image/"):
         return IsOptimized.NOT_IMAGE
 
@@ -115,8 +125,7 @@ def process_image(
     global current_process, current_output
     temp_file = None
     try:
-        mime = Magic(mime=True)
-        mimetype = mime.from_file(file_path)
+        mimetype = get_mime_type(file_path)
 
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(
